@@ -1,0 +1,51 @@
+[package]
+name = "toxi-core"
+version = "3.0.0"
+edition = "2021"
+authors = ["Meshack Bahati Ouma <bahatikylemeshack@gmail.com>"]
+description = "High-performance HTTP kernel and routing engine for the Toxi framework."
+license = "MIT"
+repository = "https://github.com/meshackbahati/toxi"
+keywords = ["web", "framework", "http", "async", "server"]
+categories = ["web-programming", "asynchronous"]
+
+[dependencies]
+async-trait = "0.1.89"
+tower-http = { version = "0.6", features = ["full"] }
+bytes = "1.11.0"
+futures-util = "0.3.31"
+http = "1.4.0"
+http-body-util = "0.1.3"
+hyper = { version = "1.8.1", features = ["full"] }
+hyper-util = { version = "0.1.19", features = ["full"] }
+regex = "1.12.2"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+serde_urlencoded = "0.7.1"
+thiserror = "2.0.17"
+tokio = { version = "1.48.0", features = ["full"] }
+tower = { version = "0.5.2", features = ["full"] }
+tower-service = "0.3.3"
+tokio-rustls = "0.26"
+rustls = "0.23"
+rustls-pemfile = "2.1"
+cookie = "0.18"
+sha1 = "0.10"
+base64 = "0.22"
+toxi-config = { path = "../toxi-config", version = "3.0.0" }
+
+[dependencies.h3]
+version = "0.0.8"
+optional = true
+
+[dependencies.quinn]
+version = "0.11.6"
+optional = true
+
+[dependencies.h3-quinn]
+version = "0.0.10"
+optional = true
+
+[features]
+default = ["http3"]
+http3 = ["h3", "quinn", "h3-quinn"]
