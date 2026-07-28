@@ -14,6 +14,25 @@ use http_body_util::BodyExt;
 
 use std::task::{Context, Poll};
 
+use hyper_tungstenite::HyperWebsocket;
+use futures_util::{SinkExt, StreamExt};
+
+/// Helper function to handle a websocket connection.
+async fn handle_websocket(websocket: HyperWebsocket) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let mut websocket = websocket.await?;
+    while let Some(message) = websocket.next().await {
+        let message = message?;
+        if message.is_text() || message.is_binary() {
+            websocket.send(message).await?;
+        } else if message.is_ping() {
+            websocket.send(hyper_tungstenite::tungstenite::Message::Pong(message.into_data())).await?;
+        } else if message.is_close() {
+            break;
+        }
+    }
+    Ok(())
+}
+
 /// HTTP protocol version for the server.
 #[derive(Debug, Clone, Copy, Default)]
 pub enum HttpVersion {
@@ -125,6 +144,33 @@ where
     }
 
     fn call(&mut self, req: hyper::Request<hyper::body::Incoming>) -> Self::Future {
+        let mut req = req;
+        if hyper_tungstenite::is_upgrade_request(&req) {
+            match hyper_tungstenite::upgrade(&mut req, None) {
+                Ok((response, websocket)) => {
+                    tokio::spawn(async move {
+                        if let Err(e) = handle_websocket(websocket).await {
+                            eprintln!("Error in websocket connection: {e}");
+                        }
+                    });
+
+                    let response = response.map(|b| {
+                        b.map_err(|e| {
+                            match e {}
+                        })
+                        .boxed()
+                    });
+
+                    return Box::pin(async move { Ok(response) });
+                }
+                Err(err) => {
+                    return Box::pin(async move {
+                        Err(Error::BadRequest(err.to_string()))
+                    });
+                }
+            }
+        }
+
         let accepts_html = req.headers().get(hyper::header::ACCEPT)
             .map(|h| h.to_str().unwrap_or("").contains("text/html"))
             .unwrap_or(false);
@@ -312,7 +358,7 @@ where
                         let result = match http_version {
                             HttpVersion::Http1 => {
                                 http1::Builder::new()
-                                    .serve_connection_with_upgrades(io, hyper_service)
+                                    .serve_connection(io, hyper_service)
                                     .await
                             }
                             HttpVersion::Http2 => {
@@ -322,7 +368,7 @@ where
                             }
                             HttpVersion::Auto => {
                                 http1::Builder::new()
-                                    .serve_connection_with_upgrades(io, hyper_service)
+                                    .serve_connection(io, hyper_service)
                                     .await
                             }
                         };
@@ -342,7 +388,7 @@ where
                                 return;
                             }
 
-                            if let Some(service_err) = err.source().and_then(|e| e.downcast_ref::<Error>()) {
+                            if let Some(service_err) = err.source().and_then(|e: &(dyn StdError + 'static)| e.downcast_ref::<Error>()) {
                                 if service_err.is_server_error() {
                                     eprintln!("Server error: {}", service_err);
                                 }
@@ -397,11 +443,11 @@ where
                     let hyper_service = TowerToHyperService::new(service);
                     
                     if let Err(err) = http1::Builder::new()
-                        .serve_connection_with_upgrades(io, hyper_service)
+                        .serve_connection(io, hyper_service)
                         .await
                     {
                         // Only log server errors, not client errors
-                        if let Some(service_err) = err.source().and_then(|e| e.downcast_ref::<Error>()) {
+                        if let Some(service_err) = err.source().and_then(|e: &(dyn StdError + 'static)| e.downcast_ref::<Error>()) {
                             if service_err.is_server_error() {
                                 eprintln!("HTTP/1.1 server error: {}", service_err);
                             }
