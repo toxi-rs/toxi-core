@@ -142,7 +142,7 @@ where
                 let hyper_service = TowerToHyperService::new(service);
                 
                 if let Err(err) = http1::Builder::new()
-                    .serve_connection(io, hyper_service)
+                    .serve_connection_with_upgrades(io, hyper_service)
                     .await
                 {
                     eprintln!("Error serving connection: {:?}", err);
@@ -195,7 +195,7 @@ where
                         let result = match negotiated {
                             HttpVersion::Http1 => {
                                 http1::Builder::new()
-                                    .serve_connection(io, hyper_service)
+                                    .serve_connection_with_upgrades(io, hyper_service)
                                     .await
                             }
                             HttpVersion::Http2 => {

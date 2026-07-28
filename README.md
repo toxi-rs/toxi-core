@@ -6,7 +6,7 @@ Core HTTP server, router, request/response types, and extractors for Toxi.
 
 ```toml
 [dependencies]
-toxi-core = "2.3.4"
+toxi-core = "3.1.0"
 ```
 
 ## Key Components

@@ -312,7 +312,7 @@ where
                         let result = match http_version {
                             HttpVersion::Http1 => {
                                 http1::Builder::new()
-                                    .serve_connection(io, hyper_service)
+                                    .serve_connection_with_upgrades(io, hyper_service)
                                     .await
                             }
                             HttpVersion::Http2 => {
@@ -322,7 +322,7 @@ where
                             }
                             HttpVersion::Auto => {
                                 http1::Builder::new()
-                                    .serve_connection(io, hyper_service)
+                                    .serve_connection_with_upgrades(io, hyper_service)
                                     .await
                             }
                         };
@@ -397,7 +397,7 @@ where
                     let hyper_service = TowerToHyperService::new(service);
                     
                     if let Err(err) = http1::Builder::new()
-                        .serve_connection(io, hyper_service)
+                        .serve_connection_with_upgrades(io, hyper_service)
                         .await
                     {
                         // Only log server errors, not client errors
