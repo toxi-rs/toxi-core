@@ -359,22 +359,23 @@ where
                         let service = BodyAdapter::new(service).with_cors(cors);
                         let hyper_service = TowerToHyperService::new(service);
 
-                        let result = match http_version {
+                        let result: std::result::Result<(), Box<dyn StdError + Send + Sync>> = match http_version {
                             HttpVersion::Http1 => {
                                 http1::Builder::new()
                                     .serve_connection(io, hyper_service)
                                     .with_upgrades()
                                     .await
+                                    .map_err(|e| Box::new(e) as Box<dyn StdError + Send + Sync>)
                             }
                             HttpVersion::Http2 => {
                                 http2::Builder::new(TokioExecutor)
                                     .serve_connection(io, hyper_service)
                                     .await
+                                    .map_err(|e| Box::new(e) as Box<dyn StdError + Send + Sync>)
                             }
                             HttpVersion::Auto => {
-                                http1::Builder::new()
-                                    .serve_connection(io, hyper_service)
-                                    .with_upgrades()
+                                hyper_util::server::conn::auto::Builder::new(TokioExecutor)
+                                    .serve_connection_with_upgrades(io, hyper_service)
                                     .await
                             }
                         };
