@@ -432,10 +432,17 @@ impl Router {
                         let mut params = serde_json::Map::new();
                         for (i, name) in route.param_names.iter().enumerate() {
                             if let Some(value) = captures.get(i + 1) {
-                                params.insert(
-                                    name.clone(),
-                                    serde_json::Value::String(value.as_str().to_string()),
-                                );
+                                let raw = value.as_str();
+                                let val = if let Ok(n) = raw.parse::<i64>() {
+                                    serde_json::Value::Number(n.into())
+                                } else if let Ok(n) = raw.parse::<f64>() {
+                                    serde_json::Number::from_f64(n)
+                                        .map(serde_json::Value::Number)
+                                        .unwrap_or(serde_json::Value::String(raw.to_string()))
+                                } else {
+                                    serde_json::Value::String(raw.to_string())
+                                };
+                                params.insert(name.clone(), val);
                             }
                         }
 

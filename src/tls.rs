@@ -143,6 +143,7 @@ where
                 
                 if let Err(err) = http1::Builder::new()
                     .serve_connection(io, hyper_service)
+                    .with_upgrades()
                     .await
                 {
                     eprintln!("Error serving connection: {:?}", err);
@@ -196,6 +197,7 @@ where
                             HttpVersion::Http1 => {
                                 http1::Builder::new()
                                     .serve_connection(io, hyper_service)
+                                    .with_upgrades()
                                     .await
                             }
                             HttpVersion::Http2 => {

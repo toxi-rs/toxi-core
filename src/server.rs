@@ -359,6 +359,7 @@ where
                             HttpVersion::Http1 => {
                                 http1::Builder::new()
                                     .serve_connection(io, hyper_service)
+                                    .with_upgrades()
                                     .await
                             }
                             HttpVersion::Http2 => {
@@ -369,6 +370,7 @@ where
                             HttpVersion::Auto => {
                                 http1::Builder::new()
                                     .serve_connection(io, hyper_service)
+                                    .with_upgrades()
                                     .await
                             }
                         };
@@ -444,6 +446,7 @@ where
                     
                     if let Err(err) = http1::Builder::new()
                         .serve_connection(io, hyper_service)
+                        .with_upgrades()
                         .await
                     {
                         // Only log server errors, not client errors
