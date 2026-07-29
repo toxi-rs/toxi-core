@@ -18,17 +18,21 @@ use hyper_tungstenite::HyperWebsocket;
 use futures_util::{SinkExt, StreamExt};
 
 /// Helper function to handle a websocket connection.
+/// NOTE: This is the fallback handler for WebSocket upgrades that are not handled
+/// by any route. It does NOT echo messages back — it only responds to pings and
+/// waits for close. Route-specific handlers (e.g., those using WebSocketUpgrade
+/// extractor) manage their own connection lifecycle.
 async fn handle_websocket(websocket: HyperWebsocket) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut websocket = websocket.await?;
     while let Some(message) = websocket.next().await {
         let message = message?;
-        if message.is_text() || message.is_binary() {
-            websocket.send(message).await?;
-        } else if message.is_ping() {
+        if message.is_ping() {
             websocket.send(hyper_tungstenite::tungstenite::Message::Pong(message.into_data())).await?;
         } else if message.is_close() {
             break;
         }
+        // Text and binary messages from unhandled WebSocket connections are dropped.
+        // If you see messages here, a WebSocket upgrade path is missing a route handler.
     }
     Ok(())
 }
