@@ -14,28 +14,9 @@ use http_body_util::BodyExt;
 
 use std::task::{Context, Poll};
 
-use hyper_tungstenite::HyperWebsocket;
-use futures_util::{SinkExt, StreamExt};
-
-/// Helper function to handle a websocket connection.
-/// NOTE: This is the fallback handler for WebSocket upgrades that are not handled
-/// by any route. It does NOT echo messages back — it only responds to pings and
-/// waits for close. Route-specific handlers (e.g., those using WebSocketUpgrade
-/// extractor) manage their own connection lifecycle.
-async fn handle_websocket(websocket: HyperWebsocket) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let mut websocket = websocket.await?;
-    while let Some(message) = websocket.next().await {
-        let message = message?;
-        if message.is_ping() {
-            websocket.send(hyper_tungstenite::tungstenite::Message::Pong(message.into_data())).await?;
-        } else if message.is_close() {
-            break;
-        }
-        // Text and binary messages from unhandled WebSocket connections are dropped.
-        // If you see messages here, a WebSocket upgrade path is missing a route handler.
-    }
-    Ok(())
-}
+// WebSocket upgrades are handled by route handlers via the WebSocketUpgrade extractor.
+// No default WS interception here — route handlers (agent, sandbox terminal, etc.)
+// receive the OnUpgrade future from hyper's request extensions.
 
 /// HTTP protocol version for the server.
 #[derive(Debug, Clone, Copy, Default)]
@@ -148,36 +129,17 @@ where
     }
 
     fn call(&mut self, req: hyper::Request<hyper::body::Incoming>) -> Self::Future {
-        let mut req = req;
-        if hyper_tungstenite::is_upgrade_request(&req) {
-            match hyper_tungstenite::upgrade(&mut req, None) {
-                Ok((response, websocket)) => {
-                    tokio::spawn(async move {
-                        if let Err(e) = handle_websocket(websocket).await {
-                            eprintln!("Error in websocket connection: {e}");
-                        }
-                    });
-
-                    let response = response.map(|b| {
-                        b.map_err(|e| {
-                            match e {}
-                        })
-                        .boxed()
-                    });
-
-                    return Box::pin(async move { Ok(response) });
-                }
-                Err(err) => {
-                    return Box::pin(async move {
-                        Err(Error::BadRequest(err.to_string()))
-                    });
-                }
-            }
-        }
-
+        let is_ws_upgrade = req.headers().get(hyper::header::UPGRADE)
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v.to_lowercase() == "websocket")
+            .unwrap_or(false);
         let accepts_html = req.headers().get(hyper::header::ACCEPT)
             .map(|h| h.to_str().unwrap_or("").contains("text/html"))
             .unwrap_or(false);
+
+        if is_ws_upgrade {
+            log::info!("WebSocket upgrade: {} {}", req.method(), req.uri().path());
+        }
             
         let req = req.map(|b| b.map_err(|e| e.into()).boxed());
         let fut = self.inner.call(req);
@@ -319,7 +281,7 @@ where
             HttpVersion::Http2 => "HTTP/2",
             HttpVersion::Auto => "HTTP/1.1 + HTTP/2",
         };
-        println!("Listening on http://{} ({})", addr, version_str);
+        log::info!("Listening on http://{} ({})", addr, version_str);
 
         let cors_config = self.cors_config.clone();
         let http_version = self.http_version;
@@ -343,7 +305,7 @@ where
             #[cfg(not(unix))]
             ctrl_c.await.ok();
 
-            println!("\nShutting down gracefully...");
+            log::info!("Received shutdown signal, shutting down gracefully...");
             let _ = shutdown_tx.send(true);
         });
 
@@ -385,24 +347,22 @@ where
                             if err_msg.contains("invalid HTTP method")
                                 || err_msg.contains("invalid HTTP version")
                             {
-                                eprintln!(
-                                    "Connection error: protocol mismatch — the client or reverse proxy \
-                                     may be sending HTTP/2 traffic to an HTTP/1.1 listener. \
-                                     Use Server::with_http_version(HttpVersion::Http2) or configure \
-                                     your proxy to forward over HTTP/1.1. Original error: {}",
-                                    err
+                                log::warn!(
+                                    "Protocol mismatch — client or reverse proxy may be sending \
+                                     HTTP/2 traffic to an HTTP/1.1 listener ({:?}). Original error: {}",
+                                    http_version, err
                                 );
                                 return;
                             }
 
                             if let Some(service_err) = err.source().and_then(|e: &(dyn StdError + 'static)| e.downcast_ref::<Error>()) {
                                 if service_err.is_server_error() {
-                                    eprintln!("Server error: {}", service_err);
+                                    log::error!("Service error: {}", service_err);
                                 }
                             } else if !err_msg.contains("connection closed")
                                 && !err_msg.contains("broken pipe")
                             {
-                                eprintln!("Connection error: {}", err);
+                                log::warn!("Connection error: {}", err);
                             }
                         }
                     });
@@ -411,10 +371,10 @@ where
                     let mut rx = shutdown_rx.clone();
                     rx.changed().await.ok();
                 } => {
-                    println!("No longer accepting new connections. Waiting for in-flight requests...");
+                    log::info!("No longer accepting new connections. Waiting for in-flight requests...");
                     // Give in-flight connections time to drain
                     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-                    println!("Shutdown complete.");
+                    log::info!("Shutdown complete.");
                     return Ok(());
                 }
             }
@@ -437,7 +397,7 @@ where
         
         tokio::spawn(async move {
             let listener = TcpListener::bind(http1_addr).await.unwrap();
-            println!("HTTP/1.1 server listening on http://{}", http1_addr);
+            log::info!("HTTP/1.1 server listening on http://{}", http1_addr);
             
             loop {
                 let (stream, _) = listener.accept().await.unwrap();
@@ -457,12 +417,12 @@ where
                         // Only log server errors, not client errors
                         if let Some(service_err) = err.source().and_then(|e: &(dyn StdError + 'static)| e.downcast_ref::<Error>()) {
                             if service_err.is_server_error() {
-                                eprintln!("HTTP/1.1 server error: {}", service_err);
+                                log::error!("HTTP/1.1 server error: {}", service_err);
                             }
                         } else {
                             let err_msg = err.to_string();
                             if !err_msg.contains("NotFound") && !err_msg.contains("connection closed") {
-                                eprintln!("HTTP/1.1 connection error: {}", err);
+                                log::warn!("HTTP/1.1 connection error: {}", err);
                             }
                         }
                     }

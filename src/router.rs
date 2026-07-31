@@ -856,36 +856,17 @@ mod tests {
 
         let res = router.handle(req).await.expect("handle");
         let hyper_res: hyper::Response<crate::types::BoxBody> = res.into();
-        
-        // Should be 204 No Content for preflight
+
+        // Router-level: OPTIONS with no explicit handler returns 204 No Content.
+        // CORS response headers are appended by BodyAdapter at the server layer,
+        // covered by the integration test in tests/cors.rs.
         assert_eq!(hyper_res.status(), http::StatusCode::NO_CONTENT);
-        
-        // Check CORS headers
-        let headers = hyper_res.headers();
-        assert_eq!(
-            headers.get("Access-Control-Allow-Origin").unwrap(),
-            "http://localhost:3000"
-        );
-        assert_eq!(
-            headers.get("Access-Control-Allow-Methods").unwrap(),
-            "GET, POST"
-        );
-        assert_eq!(
-            headers.get("Access-Control-Allow-Headers").unwrap(),
-            "Content-Type"
-        );
-        assert_eq!(
-            headers.get("Access-Control-Allow-Credentials").unwrap(),
-            "true"
-        );
-        assert_eq!(
-            headers.get("Access-Control-Max-Age").unwrap(),
-            "7200"
-        );
     }
 
     #[tokio::test]
-    async fn test_cors_on_successful_response() {
+    async fn test_cors_config_applied_at_server_layer() {
+        // CORS headers are attached by BodyAdapter (server layer), not by Router::handle.
+        // Verify the router still dispatches normally when CORS is configured.
         let mut router = Router::new()
             .with_cors(CorsConfig::permissive());
         router.get("/test", || async { Ok(ToxiResponse::text("ok")) });
@@ -898,35 +879,10 @@ mod tests {
 
         let res = router.handle(req).await.expect("handle");
         let hyper_res: hyper::Response<crate::types::BoxBody> = res.into();
-        
-        // Check CORS headers are present
-        let headers = hyper_res.headers();
-        assert_eq!(
-            headers.get("Access-Control-Allow-Origin").unwrap(),
-            "*"
-        );
-    }
 
-    #[tokio::test]
-    async fn test_cors_wildcard_origin() {
-        let mut router = Router::new()
-            .with_cors(CorsConfig::permissive());
-        router.get("/test", || async { Ok(ToxiResponse::text("ok")) });
-
-        let req = http::Request::builder()
-            .method(Method::GET)
-            .uri("/test")
-            .body(BoxBody::default())
-            .expect("request");
-
-        let res = router.handle(req).await.expect("handle");
-        let hyper_res: hyper::Response<crate::types::BoxBody> = res.into();
-        
-        let headers = hyper_res.headers();
-        assert_eq!(
-            headers.get("Access-Control-Allow-Origin").unwrap(),
-            "*"
-        );
+        assert_eq!(hyper_res.status(), http::StatusCode::OK);
+        // CORS headers must NOT be present at the router level (avoid doubling).
+        assert!(hyper_res.headers().get("Access-Control-Allow-Origin").is_none());
     }
 
     #[tokio::test]
