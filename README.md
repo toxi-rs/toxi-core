@@ -1,49 +1,22 @@
-# `toxi-core`
+# toxi-core
 
-## 1. Background
+Core HTTP server, router, request/response types, and extractors for Toxi.
 
-`toxi-core` constitutes the HTTP kernel of the Toxi framework. It provides
-routing with path parameters and wildcard segments, an asynchronous server
-that is integrated with hyper, strongly typed request and response
-abstractions, and a set of extractors through which handlers obtain typed
-data from incoming requests. Although the broader Toxi workspace distributes
-persistence, authentication, caching, and related concerns across companion
-crates, `toxi-core` is sufficient for a minimal API server, and it is the
-component upon which all such extensions depend.
-
-## 2. Installation
-
-The crate is declared as a dependency in the conventional manner, with
-version 3.1.0 constituting the current baseline for the examples that
-follow.
+## Installation
 
 ```toml
 [dependencies]
 toxi-core = "3.1.0"
 ```
 
-## 3. Components
+## Key Components
 
-The principal components, each of which is documented at its definition
-site with executable examples where behaviour admits concise illustration,
-are as follows.
+- `Router`: method/path routing with path params and wildcard support.
+- `Server`: Hyper-based async server integration for Toxi services.
+- `ToxiRequest` / `ToxiResponse`: request/response core types.
+- Extractors: `Path`, `Query`, `Json`, `Form`, `State`, `Cookies`, `Body`, `WebSocketUpgrade`.
 
-- `Router`, which maps HTTP methods with path patterns to handler endpoints,
-  and which supports parameter segments of the form `/users/:id` together
-  with wildcard segments.
-- `Server`, which binds a TCP listener, adapts incoming hyper requests, and
-  dispatches them to the configured service over HTTP/1.1 or HTTP/2.
-- `ToxiRequest` with `ToxiResponse`, which constitute the request and
-  response types that handlers exchange.
-- Extractors, namely `Path`, `Query`, `Json`, `Form`, `State`, `Cookies`,
-  `Body`, and `WebSocketUpgrade`, each of which implements `FromRequest`
-  in order to render its extraction logic explicit and testable.
-
-## 4. Illustrative usage
-
-The following example, which responds with plain text on the root path,
-is minimal in the sense that it exercises routing and response
-construction without extraction or middleware.
+## Basic Example
 
 ```rust
 use toxi_core::{Application, Request, Response, Result};
@@ -61,26 +34,9 @@ async fn main() -> Result<()> {
 }
 ```
 
-An alternative construction through `Router::new` with
-`Server::new(router).listen(addr)` remains available, and it operates
-identically under the stated configuration, since `Application` coordinates
-the same primitives.
+> **Alternative**: The manual approach using `Router::new()` + `Server::new(router).listen(addr)` works identically under the hood.
 
-## 5. Behavioural notes
+## Notes
 
-`HEAD` requests fall back to matching `GET` routes, because hyper strips
-the body for head responses, with the consequence that separate head
-handlers are not required for standard retrieval endpoints. Where a path
-exists for methods other than the requested one, the router returns
-`MethodNotAllowed` with an enumeration of permitted methods, rather than
-`NotFound`, in order to distinguish misconfiguration of the method from
-absence of the resource.
-
-## 6. Scope and limitations
-
-The documentation confines itself to dispatch, extraction, and response
-behaviour as implemented in this crate. Performance characteristics,
-which depend upon route count and payload size in ways that require
-measurement rather than assertion, are addressed in the benchmark suite
-under `benches`, to which the reader is referred for quantified baselines
-with graphical reporting.
+- `HEAD` requests automatically fall back to matching `GET` routes.
+- If a path exists for another method, the router returns `MethodNotAllowed`.
