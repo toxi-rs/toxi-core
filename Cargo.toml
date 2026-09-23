@@ -41,6 +41,28 @@ toxi-config = { path = "../toxi-config", version = "3" }
 tokio-tungstenite = "0.24"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 env_logger = "0.11"
+criterion = { version = "0.5", features = ["html_reports"] }
+serde_urlencoded = "0.7.1"
+
+[[bench]]
+name = "router"
+harness = false
+
+[[bench]]
+name = "extractors"
+harness = false
+
+[[bench]]
+name = "response"
+harness = false
+
+[[bench]]
+name = "middleware"
+harness = false
+
+[[bench]]
+name = "throughput"
+harness = false
 
 [dependencies.h3]
 version = "0.0.8"
