@@ -1,6 +1,6 @@
 [package]
 name = "toxi-core"
-version = "3.1.4"
+version = "3.1.5"
 edition = "2021"
 authors = ["Meshack Bahati Ouma <bahatikylemeshack@gmail.com>"]
 description = "High-performance HTTP kernel and routing engine for the Toxi framework."
@@ -41,6 +41,28 @@ toxi-config = { path = "../toxi-config", version = "3" }
 tokio-tungstenite = "0.24"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 env_logger = "0.11"
+divan = { package = "codspeed-divan-compat", version = "5" }
+serde_urlencoded = "0.7.1"
+
+[[bench]]
+name = "router"
+harness = false
+
+[[bench]]
+name = "extractors"
+harness = false
+
+[[bench]]
+name = "responses"
+harness = false
+
+[[bench]]
+name = "middleware"
+harness = false
+
+[[bench]]
+name = "throughput"
+harness = false
 
 [dependencies.h3]
 version = "0.0.8"
