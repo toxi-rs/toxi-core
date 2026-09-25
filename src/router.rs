@@ -427,6 +427,16 @@ impl Router {
         let try_match = |target_method: &Method, req: &mut ToxiRequest| -> Option<Arc<Route>> {
             if let Some(routes) = self.routes.get(target_method) {
                 for route in routes {
+                    // Fast path for routes without parameters (static paths and
+                    // bare wildcards, which declare no parameter names): a
+                    // boolean match avoids capture bookkeeping and allocation,
+                    // since no captures would be extracted below in any case.
+                    if route.param_names.is_empty() {
+                        if route.pattern.is_match(&path) {
+                            return Some(route.clone());
+                        }
+                        continue;
+                    }
                     if let Some(captures) = route.pattern.captures(&path) {
                         // Extract path parameters
                         let mut params = serde_json::Map::new();

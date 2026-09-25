@@ -1,22 +1,12 @@
 # toxi-core
 
-Core HTTP server, router, request/response types, and extractors for Toxi.
-
-## Installation
+HTTP server, router, and request extractors. Everything else in Toxi
+builds on this crate.
 
 ```toml
 [dependencies]
-toxi-core = "3.1.0"
+toxi-core = "3"
 ```
-
-## Key Components
-
-- `Router`: method/path routing with path params and wildcard support.
-- `Server`: Hyper-based async server integration for Toxi services.
-- `ToxiRequest` / `ToxiResponse`: request/response core types.
-- Extractors: `Path`, `Query`, `Json`, `Form`, `State`, `Cookies`, `Body`, `WebSocketUpgrade`.
-
-## Basic Example
 
 ```rust
 use toxi_core::{Application, Request, Response, Result};
@@ -27,16 +17,11 @@ async fn hello(_req: Request) -> Result<Response> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let config = toxi_config::Config::default();
-    let mut app = Application::new(config);
+    let mut app = Application::new(toxi_config::Config::default());
     app.router_mut().get("/", hello);
     app.run().await
 }
 ```
 
-> **Alternative**: The manual approach using `Router::new()` + `Server::new(router).listen(addr)` works identically under the hood.
-
-## Notes
-
-- `HEAD` requests automatically fall back to matching `GET` routes.
-- If a path exists for another method, the router returns `MethodNotAllowed`.
+`HEAD` falls back to `GET` routes. A path that exists under another
+method returns `MethodNotAllowed` instead of `NotFound`.
