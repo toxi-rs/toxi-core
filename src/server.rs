@@ -129,9 +129,11 @@ where
     }
 
     fn call(&mut self, req: hyper::Request<hyper::body::Incoming>) -> Self::Future {
+        // Case-insensitive byte comparison avoids allocating a lowercase
+        // copy of the header value on every request.
         let is_ws_upgrade = req.headers().get(hyper::header::UPGRADE)
             .and_then(|v| v.to_str().ok())
-            .map(|v| v.to_lowercase() == "websocket")
+            .map(|v| v.as_bytes().eq_ignore_ascii_case(b"websocket"))
             .unwrap_or(false);
         let accepts_html = req.headers().get(hyper::header::ACCEPT)
             .map(|h| h.to_str().unwrap_or("").contains("text/html"))
@@ -275,7 +277,16 @@ where
     /// Handles SIGTERM/SIGINT for graceful shutdown: stops accepting new
     /// connections and waits for in-flight requests to complete.
     pub async fn listen(self, addr: SocketAddr) -> Result<()> {
-        let listener = TcpListener::bind(addr).await?;
+        // Explicit backlog via TcpSocket: the default bind backlog drops or
+        // rejects bursts under connection churn, which costs nothing at
+        // steady keep-alive and avoids collapse when clients reconnect.
+        let socket = match addr {
+            SocketAddr::V4(_) => tokio::net::TcpSocket::new_v4()?,
+            SocketAddr::V6(_) => tokio::net::TcpSocket::new_v6()?,
+        };
+        socket.set_reuseaddr(true)?;
+        socket.bind(addr)?;
+        let listener = socket.listen(1024)?;
         let version_str = match self.http_version {
             HttpVersion::Http1 => "HTTP/1.1",
             HttpVersion::Http2 => "HTTP/2",
@@ -313,6 +324,10 @@ where
             tokio::select! {
                 result = listener.accept() => {
                     let (stream, _) = result?;
+                    // Disable Nagle: small JSON responses stall behind
+                    // delayed ACKs without it, at negligible packet cost.
+                    // Failures are ignored since the common path is unaffected.
+                    let _ = stream.set_nodelay(true);
                     let io = TokioIo::new(stream);
                     let service = self.service.clone();
                     let cors = cors_config.clone();
@@ -324,6 +339,11 @@ where
                         let result: std::result::Result<(), Box<dyn StdError + Send + Sync>> = match http_version {
                             HttpVersion::Http1 => {
                                 http1::Builder::new()
+                                    // Caps worst-case read buffering; bodies
+                                    // stream regardless, so JSON workloads
+                                    // are unaffected while 500-connection
+                                    // bursts cannot each pin 400 KB.
+                                    .max_buf_size(32 * 1024)
                                     .serve_connection(io, hyper_service)
                                     .with_upgrades()
                                     .await
