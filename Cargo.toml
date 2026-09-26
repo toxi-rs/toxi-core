@@ -43,6 +43,7 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 env_logger = "0.11"
 divan = { package = "codspeed-divan-compat", version = "5" }
 serde_urlencoded = "0.7.1"
+toxi-db = { path = "../toxi-db", version = "3" }
 
 [[bench]]
 name = "router"
@@ -62,6 +63,10 @@ harness = false
 
 [[bench]]
 name = "throughput"
+harness = false
+
+[[bench]]
+name = "db"
 harness = false
 
 [dependencies.h3]
