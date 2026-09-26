@@ -1,6 +1,6 @@
 [package]
 name = "toxi-core"
-version = "3.1.5"
+version = "3.1.6"
 edition = "2021"
 authors = ["Meshack Bahati Ouma <bahatikylemeshack@gmail.com>"]
 description = "High-performance HTTP kernel and routing engine for the Toxi framework."
@@ -29,7 +29,7 @@ tokio = { version = "1.48.0", features = ["full"] }
 tower = { version = "0.5.2", features = ["full"] }
 tower-service = "0.3.3"
 tokio-rustls = "0.26"
-rustls = "0.23"
+rustls = { version = "0.23", features = ["ring"] }
 rustls-pemfile = "2.1"
 cookie = "0.18"
 sha1 = "0.10"

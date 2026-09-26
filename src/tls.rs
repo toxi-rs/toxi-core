@@ -41,6 +41,12 @@ impl TlsConfig {
     /// When `enable_alpn` is true, the server advertises both `h2` and `http/1.1`
     /// so clients (and proxies) can negotiate HTTP/2 via TLS ALPN.
     pub fn load_config_with_alpn(&self, enable_alpn: bool) -> Result<ServerConfig> {
+        // rustls 0.23 selects no crypto provider by default; without an
+        // explicit install every TLS handshake panics at runtime. ring is
+        // installed once here so all TLS users are covered. The call is
+        // idempotent and a repeated install from another crate is ignored.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+
         let certs = load_certs(&self.cert_path)?;
         let key = load_private_key(&self.key_path)?;
 
