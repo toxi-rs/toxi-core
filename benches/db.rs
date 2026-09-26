@@ -6,7 +6,7 @@ use http::Method;
 use std::sync::Arc;
 use toxi_core::extract::State;
 use toxi_core::types::BoxBody;
-use toxi_core::{Result, Router, ToxiRequest, ToxiResponse};
+use toxi_core::{Result, Router, ToxiResponse};
 use toxi_db::{Database, DbPool};
 
 fn main() {

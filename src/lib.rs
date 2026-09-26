@@ -25,6 +25,7 @@
 //!
 //! ```rust,no_run
 //! use toxi_core::*;
+//! use toxi_config::Config;
 //!
 //! async fn hello(_req: Request) -> Result<Response> {
 //!     Ok(Response::text("Hello from Toxi!"))
