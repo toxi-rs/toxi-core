@@ -244,7 +244,10 @@ struct Route {
 /// server or wrapped with tower middleware.
 #[derive(Clone)]
 pub struct Router {
-    routes: HashMap<Method, Vec<Arc<Route>>>,
+    // Shared by clone so that per-request `Service::call` clones cost one
+    // atomic increment instead of reallocating the route table. Mutation
+    // goes through `Arc::make_mut`, which clones only when shared.
+    routes: Arc<HashMap<Method, Vec<Arc<Route>>>>,
     extensions: Arc<std::sync::RwLock<http::Extensions>>,
     middleware: Vec<Arc<dyn Fn(Arc<dyn Endpoint>) -> Arc<dyn Endpoint> + Send + Sync>>,
     cors_config: Option<CorsConfig>,
@@ -254,7 +257,7 @@ impl Router {
     /// Create an empty router with no routes, middleware, or CORS configuration.
     pub fn new() -> Self {
         Self {
-            routes: HashMap::new(),
+            routes: Arc::new(HashMap::new()),
             extensions: Arc::new(std::sync::RwLock::new(http::Extensions::new())),
             middleware: Vec::new(),
             cors_config: None,
@@ -406,7 +409,7 @@ impl Router {
             handler: endpoint,
         });
         
-        self.routes
+        Arc::make_mut(&mut self.routes)
             .entry(method)
             .or_insert_with(Vec::new)
             .push(route);
