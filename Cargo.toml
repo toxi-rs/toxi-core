@@ -5,7 +5,7 @@ edition = "2021"
 authors = ["Meshack Bahati Ouma <bahatikylemeshack@gmail.com>"]
 description = "High-performance HTTP kernel and routing engine for the Toxi framework."
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/meshackbahati/toxi"
+repository = "https://github.com/toxi-rs/toxi-core"
 keywords = ["web", "framework", "http", "async", "server"]
 categories = ["web-programming", "asynchronous"]
 
