@@ -11,7 +11,7 @@ which remains the full documentation hub.
   accumulate without bound across load generations and memory grows
   with them. No public API change.
 
-## Unreleased
+## [3.1.10] - 2026-09-28
 
 - **toxi-core** (`3.1.10`): router dispatch borrows the request path
   instead of copying it per request and answers misses without a
