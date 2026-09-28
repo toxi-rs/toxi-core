@@ -344,6 +344,13 @@ where
                                     // are unaffected while 500-connection
                                     // bursts cannot each pin 400 KB.
                                     .max_buf_size(32 * 1024)
+                                    // Reaps connections idle past the header
+                                    // timeout so keep-alive connection counts
+                                    // cannot accumulate without bound across
+                                    // load generations. Individual runs last
+                                    // seconds; 75 s never triggers mid-run.
+                                    .timer(hyper_util::rt::TokioTimer::new())
+                                    .header_read_timeout(std::time::Duration::from_secs(75))
                                     .serve_connection(io, hyper_service)
                                     .with_upgrades()
                                     .await
