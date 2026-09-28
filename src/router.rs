@@ -424,98 +424,118 @@ impl Router {
     pub async fn handle(&self, mut req: ToxiRequest) -> Result<ToxiResponse> {
         req.extensions_mut().insert(self.extensions.clone());
         let method = req.method().clone();
-        let path = req.uri().path().to_string();
 
+        // Match without touching the request so the path borrows straight
+        // from the URI with no per-request copy. Parameter extraction
+        // produces owned values, which ends the borrow before mutation.
+        let path = req.uri().path();
+        let matched = self.match_route(&method, path);
+        let (route, params) = match matched {
+            Some(hit) => hit,
+            None => return self.miss(&method, path).await,
+        };
+        if let Some(params) = params {
+            req.extensions_mut().insert(crate::extract::PathParams(params));
+        }
+        // Add router extensions to request so State extractor can find global state
+        req.extensions_mut().insert(self.extensions.clone());
+        // CORS headers are applied by BodyAdapter at the server level;
+        // do NOT add them here to avoid doubling.
+        route.handler.call(req).await
+    }
+
+    /// Pure route match: method plus path in, handler with optional
+    /// extracted parameters out. Takes no request so callers borrow the
+    /// URI path instead of copying it per request.
+    fn match_route(
+        &self,
+        method: &Method,
+        path: &str,
+    ) -> Option<(Arc<Route>, Option<serde_json::Value>)> {
         // Helper to try matching routes for a specific method
-        let try_match = |target_method: &Method, req: &mut ToxiRequest| -> Option<Arc<Route>> {
-            if let Some(routes) = self.routes.get(target_method) {
-                for route in routes {
-                    // Fast path for routes without parameters (static paths and
-                    // bare wildcards, which declare no parameter names): a
-                    // boolean match avoids capture bookkeeping and allocation,
-                    // since no captures would be extracted below in any case.
-                    if route.param_names.is_empty() {
-                        if route.pattern.is_match(&path) {
-                            return Some(route.clone());
-                        }
-                        continue;
+        let try_match = |target_method: &Method| -> Option<(Arc<Route>, Option<serde_json::Value>)> {
+            let routes = self.routes.get(target_method)?;
+            for route in routes {
+                // Fast path for routes without parameters (static paths and
+                // bare wildcards, which declare no parameter names): a
+                // boolean match avoids capture bookkeeping and allocation,
+                // since no captures would be extracted below in any case.
+                if route.param_names.is_empty() {
+                    if route.pattern.is_match(path) {
+                        return Some((route.clone(), None));
                     }
-                    if let Some(captures) = route.pattern.captures(&path) {
-                        // Extract path parameters
-                        let mut params = serde_json::Map::new();
-                        for (i, name) in route.param_names.iter().enumerate() {
-                            if let Some(value) = captures.get(i + 1) {
-                                let raw = value.as_str();
-                                let val = if let Ok(n) = raw.parse::<i64>() {
-                                    serde_json::Value::Number(n.into())
-                                } else if let Ok(n) = raw.parse::<f64>() {
-                                    serde_json::Number::from_f64(n)
-                                        .map(serde_json::Value::Number)
-                                        .unwrap_or(serde_json::Value::String(raw.to_string()))
-                                } else {
-                                    serde_json::Value::String(raw.to_string())
-                                };
-                                params.insert(name.clone(), val);
-                            }
+                    continue;
+                }
+                if let Some(captures) = route.pattern.captures(path) {
+                    // Extract path parameters
+                    let mut params = serde_json::Map::new();
+                    for (i, name) in route.param_names.iter().enumerate() {
+                        if let Some(value) = captures.get(i + 1) {
+                            let raw = value.as_str();
+                            let val = if let Ok(n) = raw.parse::<i64>() {
+                                serde_json::Value::Number(n.into())
+                            } else if let Ok(n) = raw.parse::<f64>() {
+                                serde_json::Number::from_f64(n)
+                                    .map(serde_json::Value::Number)
+                                    .unwrap_or(serde_json::Value::String(raw.to_string()))
+                            } else {
+                                serde_json::Value::String(raw.to_string())
+                            };
+                            params.insert(name.clone(), val);
                         }
+                    }
 
-                        // Store params in request extensions
-                        if !params.is_empty() {
-                            req.extensions_mut().insert(crate::extract::PathParams(
-                                serde_json::Value::Object(params),
-                            ));
-                        }
-                        
-                        return Some(route.clone());
+                    // Store params in request extensions
+                    if params.is_empty() {
+                        return Some((route.clone(), None));
                     }
+                    return Some((
+                        route.clone(),
+                        Some(serde_json::Value::Object(params)),
+                    ));
                 }
             }
             None
         };
 
         // 1. Try exact method match
-        if let Some(route) = try_match(&method, &mut req) {
-            // Add router extensions to request so State extractor can find global state
-            req.extensions_mut().insert(self.extensions.clone());
-            // CORS headers are applied by BodyAdapter at the server level;
-            // do NOT add them here to avoid doubling.
-            return route.handler.call(req).await;
+        if let Some(hit) = try_match(method) {
+            return Some(hit);
         }
 
+        // 2. If HEAD, try GET
+        if *method == Method::HEAD {
+            if let Some(hit) = try_match(&Method::GET) {
+                // For HEAD requests, we execute the GET handler but the server/hyper
+                // will strip the body automatically since it's a HEAD response.
+                return Some(hit);
+            }
+        }
+
+        None
+    }
+
+    /// Handle OPTIONS preflight, 405, and 404 outcomes for unmatched requests.
+    async fn miss(&self, method: &Method, path: &str) -> Result<ToxiResponse> {
         // 2. If OPTIONS, return empty success response for CORS if no explicit handler
         // CORS headers are added by BodyAdapter at the server level.
-        if method == Method::OPTIONS {
-            if let Some(_route) = try_match(&Method::OPTIONS, &mut req) {
-                // Explicit handler exists, will be handled by step 1
-            } else {
-                // Return 204 No Content for CORS preflight
-                return Ok(ToxiResponse::new(
-                    http::Response::builder()
-                        .status(http::StatusCode::NO_CONTENT)
-                        .body(crate::types::BoxBody::default())
-                        .unwrap(),
-                ));
-            }
-        }
-
-        // 3. If HEAD, try GET
-        if method == Method::HEAD {
-            if let Some(route) = try_match(&Method::GET, &mut req) {
-                // Add router extensions to request so State extractor can find global state
-                req.extensions_mut().insert(self.extensions.clone());
-                // For HEAD requests, we execute the GET handler but the server/hyper 
-                // will strip the body automatically since it's a HEAD response.
-                return route.handler.call(req).await;
-            }
+        if *method == Method::OPTIONS {
+            // Return 204 No Content for CORS preflight
+            return Ok(ToxiResponse::new(
+                http::Response::builder()
+                    .status(http::StatusCode::NO_CONTENT)
+                    .body(crate::types::BoxBody::default())
+                    .unwrap(),
+            ));
         }
 
         // 3. Path exists for other methods => method not allowed
         let allowed_methods: Vec<String> = self
             .routes
             .iter()
-            .filter(|(route_method, _)| **route_method != method)
+            .filter(|(route_method, _)| **route_method != *method)
             .filter_map(|(route_method, routes)| {
-                if routes.iter().any(|route| route.pattern.is_match(&path)) {
+                if routes.iter().any(|route| route.pattern.is_match(path)) {
                     Some(route_method.as_str().to_string())
                 } else {
                     None

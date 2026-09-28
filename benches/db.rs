@@ -6,7 +6,7 @@ use std::sync::Arc;
 use toxi_core::extract::State;
 use toxi_core::types::BoxBody;
 use toxi_core::{Result, Router, ToxiResponse};
-use toxi_db::{Database, DbPool};
+use toxi_db::{Database, DbPool, QueryCache};
 
 fn main() {
     divan::main();
@@ -58,6 +58,25 @@ fn db_find_by_id(bencher: Bencher) {
     let rt = rt();
     let db = rt.block_on(setup_db(100));
     bencher.bench(|| divan::black_box(rt.block_on(read_id(&db, 42))));
+}
+
+#[divan::bench]
+fn cache_get_hit(bencher: Bencher) {
+    let rt = rt();
+    let cache = QueryCache::new();
+    rt.block_on(cache.insert(
+        "user:42".to_string(),
+        std::time::Duration::from_secs(60),
+        vec![1u8; 256],
+    ));
+    bencher.bench(|| divan::black_box(rt.block_on(cache.get("user:42"))));
+}
+
+#[divan::bench]
+fn cache_get_miss(bencher: Bencher) {
+    let rt = rt();
+    let cache = QueryCache::new();
+    bencher.bench(|| divan::black_box(rt.block_on(cache.get("missing"))));
 }
 
 #[divan::bench]

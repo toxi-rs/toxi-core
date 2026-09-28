@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::sync::Arc;
 use tokio::net::TcpListener;
 use hyper::server::conn::{http1, http2};
 use hyper_util::rt::TokioIo;
@@ -55,7 +56,40 @@ pub use http3_server::Http3Server;
 #[derive(Clone)]
 pub struct BodyAdapter<S> {
     inner: S,
-    cors_config: Option<CorsConfig>,
+    cors: Option<Arc<ResolvedCors>>,
+}
+
+/// CORS headers resolved once at configuration time.
+///
+/// Joining the method lists and parsing header values on every response
+/// costs several allocations per request for values that never change
+/// while the server runs.
+#[derive(Clone, Default)]
+struct ResolvedCors {
+    allow_origin: Option<HeaderValue>,
+    allow_methods: Option<HeaderValue>,
+    allow_headers: Option<HeaderValue>,
+    allow_credentials: bool,
+    max_age: Option<HeaderValue>,
+}
+
+impl ResolvedCors {
+    fn resolve(config: &CorsConfig) -> Self {
+        Self {
+            allow_origin: config
+                .allowed_origins
+                .first()
+                .and_then(|o| HeaderValue::from_str(o).ok()),
+            allow_methods: (!config.allowed_methods.is_empty())
+                .then(|| HeaderValue::from_str(&config.allowed_methods.join(", ")).ok())
+                .flatten(),
+            allow_headers: (!config.allowed_headers.is_empty())
+                .then(|| HeaderValue::from_str(&config.allowed_headers.join(", ")).ok())
+                .flatten(),
+            allow_credentials: config.allow_credentials,
+            max_age: HeaderValue::from_str(&config.max_age.to_string()).ok(),
+        }
+    }
 }
 
 impl<S> BodyAdapter<S> {
@@ -63,50 +97,47 @@ impl<S> BodyAdapter<S> {
     pub fn new(service: S) -> Self {
         Self {
             inner: service,
-            cors_config: None,
+            cors: None,
         }
     }
 
     /// Attach a CORS configuration to this adapter.
     pub fn with_cors(mut self, cors_config: Option<CorsConfig>) -> Self {
-        self.cors_config = cors_config;
+        self.cors = cors_config.as_ref().map(|c| Arc::new(ResolvedCors::resolve(c)));
         self
     }
 
     /// Add CORS headers to a hyper response
     fn add_cors_to_response(&self, res: &mut hyper::Response<crate::types::BoxBody>) {
-        if let Some(cors) = &self.cors_config {
-            let headers = res.headers_mut();
-            
-            if let Some(origin) = cors.allowed_origins.first() {
-                if let Ok(val) = HeaderValue::from_str(origin) {
-                    headers.insert(http::header::ACCESS_CONTROL_ALLOW_ORIGIN, val);
-                }
-            }
-            
-            // Add Access-Control-Allow-Methods (join all methods with ", ")
-            if !cors.allowed_methods.is_empty() {
-                let methods = cors.allowed_methods.join(", ");
-                if let Ok(val) = HeaderValue::from_str(&methods) {
-                    headers.insert(http::header::ACCESS_CONTROL_ALLOW_METHODS, val);
-                }
-            }
-            
-            // Add Access-Control-Allow-Headers (join all headers with ", ")
-            if !cors.allowed_headers.is_empty() {
-                let headers_list = cors.allowed_headers.join(", ");
-                if let Ok(val) = HeaderValue::from_str(&headers_list) {
-                    headers.insert(http::header::ACCESS_CONTROL_ALLOW_HEADERS, val);
-                }
-            }
-            
-            if cors.allow_credentials {
-                headers.insert(http::header::ACCESS_CONTROL_ALLOW_CREDENTIALS, HeaderValue::from_static("true"));
-            }
-            
-            if let Ok(val) = HeaderValue::from_str(&cors.max_age.to_string()) {
-                headers.insert(http::header::ACCESS_CONTROL_MAX_AGE, val);
-            }
+        if let Some(cors) = &self.cors {
+            cors.apply(res.headers_mut());
+        }
+    }
+}
+
+/// Pre-resolved CORS headers shared across responses.
+impl ResolvedCors {
+    /// Insert the resolved headers. Clones are reference-counted header
+    /// values, so per-response cost stays constant and small.
+    fn apply(&self, headers: &mut http::HeaderMap) {
+        if let Some(origin) = &self.allow_origin {
+            headers.insert(http::header::ACCESS_CONTROL_ALLOW_ORIGIN, origin.clone());
+        }
+
+        if let Some(methods) = &self.allow_methods {
+            headers.insert(http::header::ACCESS_CONTROL_ALLOW_METHODS, methods.clone());
+        }
+
+        if let Some(header_list) = &self.allow_headers {
+            headers.insert(http::header::ACCESS_CONTROL_ALLOW_HEADERS, header_list.clone());
+        }
+
+        if self.allow_credentials {
+            headers.insert(http::header::ACCESS_CONTROL_ALLOW_CREDENTIALS, HeaderValue::from_static("true"));
+        }
+
+        if let Some(max_age) = &self.max_age {
+            headers.insert(http::header::ACCESS_CONTROL_MAX_AGE, max_age.clone());
         }
     }
 }
@@ -145,14 +176,14 @@ where
             
         let req = req.map(|b| b.map_err(|e| e.into()).boxed());
         let fut = self.inner.call(req);
-        let cors = self.cors_config.clone();
-        
+        let cors = self.cors.clone();
+
         Box::pin(async move {
             match fut.await {
                 Ok(response) => {
                     let mut hyper_response: hyper::Response<crate::types::BoxBody> = response.into();
                     // Add CORS headers to successful responses
-                    let adapter = BodyAdapter { inner: (), cors_config: cors };
+                    let adapter = BodyAdapter { inner: (), cors: cors.clone() };
                     adapter.add_cors_to_response(&mut hyper_response);
                     Ok(hyper_response)
                 },
@@ -174,13 +205,13 @@ where
                             .unwrap();
                         
                         // Add CORS headers to error responses too
-                        let adapter = BodyAdapter { inner: (), cors_config: cors };
+                        let adapter = BodyAdapter { inner: (), cors: cors.clone() };
                         adapter.add_cors_to_response(&mut res);
                         Ok(res)
                     } else {
                         let mut error_response: hyper::Response<crate::types::BoxBody> = ToxiResponse::from(error).into();
                         // Add CORS headers to error responses
-                        let adapter = BodyAdapter { inner: (), cors_config: cors };
+                        let adapter = BodyAdapter { inner: (), cors };
                         adapter.add_cors_to_response(&mut error_response);
                         Ok(error_response)
                     }

@@ -86,12 +86,15 @@ pub trait FromRequest: Sized {
 
 impl<T: DeserializeOwned + Send> FromRequest for Path<T> {
     async fn from_request(req: &mut ToxiRequest) -> Result<Self> {
-        // Path params are stored in request extensions after routing
+        // Path params are stored in request extensions after routing.
+        // Deserialize borrows the stored value instead of cloning the
+        // whole map first; `serde_json::Value` deserializes from a
+        // reference with identical semantics to `from_value`.
         req.extensions()
             .get::<PathParams>()
             .ok_or_else(|| Error::BadRequest("No path parameters found".to_string()))
             .and_then(|params| {
-                serde_json::from_value(params.0.clone())
+                T::deserialize(&params.0)
                     .map(Path)
                     .map_err(|e| Error::BadRequest(format!("Invalid path parameters: {}", e)))
             })
@@ -259,20 +262,23 @@ impl Cookies {
 
 impl FromRequest for Cookies {
     async fn from_request(req: &mut ToxiRequest) -> Result<Self> {
-        let mut cookies_map = std::collections::HashMap::new();
-        
+        // Pre-size the map from the separator count so cookie-heavy
+        // requests do not rehash while inserting.
         if let Some(cookie_header) = req.headers().get(http::header::COOKIE) {
             if let Ok(cookie_str) = cookie_header.to_str() {
+                let count = cookie_str.bytes().filter(|&b| b == b';').count() + 1;
+                let mut cookies_map = std::collections::HashMap::with_capacity(count);
                 for cookie_pair in cookie_str.split(';') {
                     let trimmed = cookie_pair.trim();
                     if let Some((name, value)) = trimmed.split_once('=') {
                         cookies_map.insert(name.trim().to_string(), value.trim().to_string());
                     }
                 }
+                return Ok(Cookies { cookies: cookies_map });
             }
         }
-        
-        Ok(Cookies { cookies: cookies_map })
+
+        Ok(Cookies { cookies: std::collections::HashMap::new() })
     }
 }
 
