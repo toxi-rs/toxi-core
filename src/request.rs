@@ -6,9 +6,15 @@ use http_body_util::BodyExt;
 pub trait RequestExt {
     /// Read the entire body as a String
     fn body_string(&mut self) -> impl std::future::Future<Output = Result<String>> + Send;
-    
+
     /// Read the entire body as Bytes
     fn body_bytes(&mut self) -> impl std::future::Future<Output = Result<bytes::Bytes>> + Send;
+
+    /// Parse the body as JSON. This is the built-in mapping helper, so
+    /// handlers never import a JSON library for request bodies.
+    fn json<T>(&mut self) -> impl std::future::Future<Output = Result<T>> + Send
+    where
+        T: serde::de::DeserializeOwned;
 }
 
 impl RequestExt for ToxiRequest {
@@ -23,5 +29,14 @@ impl RequestExt for ToxiRequest {
         let collected = body.collect().await
             .map_err(|e| Error::InternalServerError(format!("Failed to read body: {}", e)))?;
         Ok(collected.to_bytes())
+    }
+
+    async fn json<T>(&mut self) -> Result<T>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        let bytes = self.body_bytes().await?;
+        serde_json::from_slice(&bytes)
+            .map_err(|e| Error::BadRequest(format!("Invalid JSON: {}", e)))
     }
 }

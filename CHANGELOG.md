@@ -91,3 +91,9 @@ which remains the full documentation hub.
 ## 3.1.0
 
 - **toxi-core** serves HTTP/1.1 connections using the low-level hyper 1.x library. In hyper 1.x, http1::Builder::new().serve_connection(io, service) does not support or honor WebSocket/HTTP upgrades (yielding Error(User(ManualUpgrade)) when an upgrade is attempted).
+
+## [3.1.11] - 2026-09-28
+
+### Added
+- `RequestExt::json::<T>()` parses the body as JSON, so handlers map
+  request bodies without importing a JSON library.
